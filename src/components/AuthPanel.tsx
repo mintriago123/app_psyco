@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { signIn, signUp } from "../lib/supabase/auth.service";
 import { Icon } from "./Icon";
 import { useAppState } from "./AppProviders";
@@ -14,14 +13,41 @@ interface AuthPanelProps {
 export function AuthPanel({ mode }: AuthPanelProps) {
   const router = useRouter();
   const { user, loading: sessionLoading, setSession } = useAppState();
+  const [currentMode, setCurrentMode] = useState(mode);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const isRegister = mode === "register";
+  const loginTabRef = useRef<HTMLButtonElement>(null);
+  const registerTabRef = useRef<HTMLButtonElement>(null);
+  const isRegister = currentMode === "register";
+
+  useEffect(() => {
+    setCurrentMode(mode);
+    setError(null);
+    setMessage(null);
+  }, [mode]);
 
   useEffect(() => {
     if (!sessionLoading && user) router.replace("/");
   }, [router, sessionLoading, user]);
+
+  function changeMode(nextMode: AuthPanelProps["mode"]) {
+    if (nextMode === currentMode) return;
+
+    setCurrentMode(nextMode);
+    setError(null);
+    setMessage(null);
+    window.history.replaceState(null, "", nextMode === "register" ? "/register" : "/login");
+  }
+
+  function handleModeKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+
+    event.preventDefault();
+    const nextMode = currentMode === "login" ? "register" : "login";
+    changeMode(nextMode);
+    (nextMode === "login" ? loginTabRef : registerTabRef).current?.focus();
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -91,20 +117,56 @@ export function AuthPanel({ mode }: AuthPanelProps) {
           {isRegister ? "Tu recorrido queda guardado en la nube." : "Continúa donde dejaste tu estudio."}
         </p>
 
-        <form className="auth-form" onSubmit={handleSubmit}>
-          <label htmlFor={`${mode}-email`}>Correo electrónico</label>
+        <div
+          className="auth-mode-tabs"
+          role="tablist"
+          aria-label="Modo de autenticación"
+          data-mode={currentMode}
+          onKeyDown={handleModeKeyDown}
+        >
+          <span className="auth-mode-slider" aria-hidden="true" />
+          <button
+            ref={loginTabRef}
+            id="auth-tab-login"
+            className="auth-mode-tab"
+            type="button"
+            role="tab"
+            aria-selected={currentMode === "login"}
+            aria-controls="auth-form"
+            tabIndex={currentMode === "login" ? 0 : -1}
+            onClick={() => changeMode("login")}
+          >
+            Iniciar sesión
+          </button>
+          <button
+            ref={registerTabRef}
+            id="auth-tab-register"
+            className="auth-mode-tab"
+            type="button"
+            role="tab"
+            aria-selected={currentMode === "register"}
+            aria-controls="auth-form"
+            tabIndex={currentMode === "register" ? 0 : -1}
+            onClick={() => changeMode("register")}
+          >
+            Crear cuenta
+          </button>
+        </div>
+
+        <form id="auth-form" className="auth-form" onSubmit={handleSubmit}>
+          <label htmlFor="auth-email">Correo electrónico</label>
           <input
             autoComplete="email"
-            id={`${mode}-email`}
+            id="auth-email"
             name="email"
             type="email"
             placeholder="nombre@correo.com"
             required
           />
-          <label htmlFor={`${mode}-password`}>Contraseña</label>
+          <label htmlFor="auth-password">Contraseña</label>
           <input
             autoComplete={isRegister ? "new-password" : "current-password"}
-            id={`${mode}-password`}
+            id="auth-password"
             name="password"
             type="password"
             placeholder={isRegister ? "Al menos 8 caracteres" : "Tu contraseña"}
@@ -121,9 +183,12 @@ export function AuthPanel({ mode }: AuthPanelProps) {
 
         <p className="auth-switch">
           {isRegister ? "¿Ya tienes cuenta?" : "¿Primera vez aquí?"}{" "}
-          <Link href={isRegister ? "/login" : "/register"}>
+          <button
+            type="button"
+            onClick={() => changeMode(isRegister ? "login" : "register")}
+          >
             {isRegister ? "Inicia sesión" : "Crea una cuenta"}
-          </Link>
+          </button>
         </p>
       </div>
     </section>

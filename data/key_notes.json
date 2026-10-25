@@ -51,7 +51,9 @@
       {"term": "Amnesia de fijación", "definition": "Incapacidad para consolidar recuerdos nuevos; la guía la relaciona con amnesia anterógrada de causa orgánica."},
       {"term": "Confabulación", "definition": "Relato que mezcla recuerdos falsos y verdaderos para compensar pérdida de memoria."},
       {"term": "Déjà vu", "definition": "Falsa sensación de haber visto antes una situación que la persona sabe que experimenta por primera vez."},
-      {"term": "Jamais vu", "definition": "La persona reconoce y recuerda una situación, pero no experimenta familiaridad con ella."}
+      {"term": "Jamais vu", "definition": "La persona reconoce y recuerda una situación, pero no experimenta familiaridad con ella."},
+      {"term": "Ley de Ribot", "definition": "Principio según el cual los recuerdos más recientes, menos organizados y automatizados son más vulnerables a perderse."},
+      {"term": "Ecmnesia", "definition": "Creer estar en el pasado y revivir con gran implicación emocional vivencias del pasado, con pérdida de la orientación en el presente."}
     ],
     "comparativeTables": [
       {
@@ -97,7 +99,8 @@
       {"term": "Pareidolia", "definition": "Tipo de ilusión en que se organiza un estímulo ambiguo y poco estructurado dándole un significado concreto, como ver caras en nubes."},
       {"term": "Alucinación", "definition": "Experiencia similar a una percepción real, con fuerza e impacto perceptivo, que ocurre en ausencia del estímulo apropiado y no puede dirigirse voluntariamente."},
       {"term": "Alucinosis", "definition": "La persona es consciente de que lo que percibe no existe."},
-      {"term": "Despersonalización", "definition": "Vivencia de extrañeza o cambio del yo, con sensación de estar alejado de uno mismo y pérdida de espontaneidad."}
+      {"term": "Despersonalización", "definition": "Vivencia de extrañeza o cambio del yo, con sensación de estar alejado de uno mismo y pérdida de espontaneidad."},
+      {"term": "Escisión perceptiva", "definition": "El objeto percibido se desintegra en fragmentos o elementos; la alteración puede afectar las formas (morfolisis) o disociar color y forma (metacromía)."}
     ],
     "comparativeTables": [
       {
@@ -199,7 +202,11 @@
       {"term": "Insomnio", "definition": "Pérdida del sueño o dificultad para dormir; la guía clasifica formas inicial, tardía, media, mixta y total."},
       {"term": "Pesadilla", "definition": "Episodio de sueño REM con contenido terrorífico, angustiante o amenazante que puede despertar a la persona."},
       {"term": "Bulimia", "definition": "Episodios recurrentes de ingesta excesiva seguidos de conductas compensatorias, según el material."},
-      {"term": "Disfunciones sexuales", "definition": "Alteraciones en alguna de las fases descritas de la respuesta sexual: deseo, excitación, meseta, orgasmo y resolución."}
+      {"term": "Disfunciones sexuales", "definition": "Alteraciones en alguna de las fases descritas de la respuesta sexual: deseo, excitación, meseta, orgasmo y resolución."},
+      {"term": "Moria", "definition": "Estado de alegría insulsa o sosa, sin sentido, descrita como una alegría tonta; puede observarse en personas con tumoraciones cerebrales o retrasos intelectuales profundos."},
+      {"term": "Catatimia", "definition": "Estado afectivo intenso hacia una persona que puede interferir en la percepción real de su conducta."},
+      {"term": "Pica", "definition": "Hábito de comer sustancias inorgánicas no apropiadas para la ingestión, como cal, tierra, arena, plastilina, excrementos de animales u hojas."},
+      {"term": "Malacia", "definition": "Hábito de combinar sabores que comúnmente no combinan en la alimentación, como mango con arroz o frijoles con postres."}
     ],
     "comparativeTables": [
       {

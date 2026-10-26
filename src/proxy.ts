@@ -47,13 +47,16 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabase.auth.getUser();
   const pathname = request.nextUrl.pathname.replace(/\/+$/, "") || "/";
-  const isAuthRoute = pathname === "/login" || pathname === "/register";
+  const isAuthRoute =
+    pathname === "/login" ||
+    pathname === "/register" ||
+    pathname.startsWith("/auth/callback");
 
   if (!user && !isAuthRoute) {
     return redirectWithCookies(new URL("/login", request.url), response);
   }
 
-  if (user && isAuthRoute) {
+  if (user && (pathname === "/login" || pathname === "/register")) {
     return redirectWithCookies(new URL("/", request.url), response);
   }
 

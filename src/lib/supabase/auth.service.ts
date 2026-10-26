@@ -33,7 +33,17 @@ export async function signUp(
   password: string,
 ): Promise<{ data: AuthCredentialsData | null; error: AuthOperationError | null }> {
   try {
-    const { data, error } = await createClient().auth.signUp({ email, password });
+    const origin =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : (process.env.NEXT_PUBLIC_SITE_URL ?? "");
+    const { data, error } = await createClient().auth.signUp({
+      email,
+      password,
+      ...(origin
+        ? { options: { emailRedirectTo: `${origin}/auth/callback` } }
+        : {}),
+    });
     return { data, error };
   } catch (error) {
     return { data: null, error: toError(error) };

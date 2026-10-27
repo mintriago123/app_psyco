@@ -10,6 +10,28 @@ interface AuthPanelProps {
   mode: "login" | "register";
 }
 
+function getAuthErrorMessage(error: Error): string {
+  const code =
+    "code" in error && typeof error.code === "string" ? error.code : "";
+  const message = error.message.toLowerCase();
+
+  if (
+    code === "over_email_send_rate_limit" ||
+    message.includes("email rate limit exceeded")
+  ) {
+    return "Se alcanzó el límite de correos de confirmación de Supabase. Espera a que se libere o configura un proveedor SMTP en Authentication para habilitar más registros.";
+  }
+
+  if (
+    code === "over_request_rate_limit" ||
+    message.includes("too many requests")
+  ) {
+    return "Se hicieron demasiados intentos en poco tiempo. Espera unos minutos e inténtalo de nuevo.";
+  }
+
+  return error.message || "No se pudo completar la solicitud.";
+}
+
 export function AuthPanel({ mode }: AuthPanelProps) {
   const router = useRouter();
   const { user, loading: sessionLoading, setSession } = useAppState();
@@ -64,7 +86,7 @@ export function AuthPanel({ mode }: AuthPanelProps) {
 
     setSubmitting(false);
     if (result.error) {
-      setError(result.error.message || "No se pudo completar la solicitud.");
+      setError(getAuthErrorMessage(result.error));
       return;
     }
 

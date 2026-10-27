@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { AppShell } from "../components/AppShell";
+import { AppProviders } from "../components/AppProviders";
+import { Navbar } from "../components/Navbar";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -26,7 +27,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="app-body">
         <a className="skip-link" href="#main-content">Saltar al contenido</a>
-        <AppShell>{children}</AppShell>
+        <AppProviders>
+          <Navbar />
+          <main className="app-main" id="main-content">{children}</main>
+        </AppProviders>
       </body>
     </html>
   );

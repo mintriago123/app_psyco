@@ -98,3 +98,18 @@ create trigger create_user_progress_after_signup
   after insert on auth.users
   for each row
   execute function public.create_user_progress_for_new_user();
+
+-- Ping seguro para Vercel Cron: confirma acceso a la base sin leer progreso.
+create or replace function public.keep_alive()
+returns text
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select 'ok'::text;
+$$;
+
+revoke all on function public.keep_alive() from public;
+revoke all on function public.keep_alive() from anon, authenticated;
+grant execute on function public.keep_alive() to anon;

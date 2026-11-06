@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
+import type { Database } from "@/lib/supabase/database.types";
 
 /**
  * GET /api/keep-alive
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -33,18 +34,18 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  const supabase = createClient<Database>(supabaseUrl, supabaseKey);
 
-  // Query mínima: cuenta 1 fila de la tabla más liviana disponible.
-  // No depende de autenticación, usa la anon key.
+  // El RPC devuelve una constante y no consulta datos de estudiantes.
   const start = Date.now();
-  const { error } = await supabase.from("user_progress").select("id").limit(1);
+  const { data, error } = await supabase.rpc("keep_alive", {}, { get: true });
   const elapsed = Date.now() - start;
 
-  if (error) {
-    console.error("[keep-alive] Supabase ping failed:", error.message);
+  if (error || data !== "ok") {
+    const message = error?.message ?? "Unexpected response from keep_alive RPC";
+    console.error("[keep-alive] Supabase ping failed:", message);
     return NextResponse.json(
-      { ok: false, error: error.message, elapsed },
+      { ok: false, error: message, elapsed },
       { status: 500 },
     );
   }

@@ -14,6 +14,14 @@ function redirectWithCookies(
 }
 
 export async function proxy(request: NextRequest): Promise<NextResponse> {
+  const pathname = request.nextUrl.pathname.replace(/\/+$/, "") || "/";
+
+  // Vercel Cron authenticates with CRON_SECRET, not a Supabase user session.
+  // The route handler validates that secret before doing any work.
+  if (pathname === "/api/keep-alive") {
+    return NextResponse.next({ request });
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey =
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
@@ -46,7 +54,6 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const pathname = request.nextUrl.pathname.replace(/\/+$/, "") || "/";
   const isAuthRoute =
     pathname === "/login" ||
     pathname === "/register" ||

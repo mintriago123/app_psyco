@@ -37,10 +37,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const next = searchParams.get("next") ?? "/";
   const destination = getSafeDestination(next, request);
   const errorUrl = new URL("/login?error=auth-code-error", request.url);
+  const errorDestination = destination.pathname === "/reset-password"
+    ? new URL("/reset-password", request.url)
+    : errorUrl;
   let response = NextResponse.next({ request });
 
   if (!code && !(token_hash && type)) {
-    return redirectWithCookies(errorUrl, response);
+    return redirectWithCookies(errorDestination, response);
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -49,7 +52,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseKey) {
-    return redirectWithCookies(errorUrl, response);
+    return redirectWithCookies(errorDestination, response);
   }
 
   const supabase = createServerClient<Database>(supabaseUrl, supabaseKey, {
@@ -81,10 +84,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         });
 
     return redirectWithCookies(
-      error ? errorUrl : destination,
+      error ? errorDestination : destination,
       response,
     );
   } catch {
-    return redirectWithCookies(errorUrl, response);
+    return redirectWithCookies(errorDestination, response);
   }
 }

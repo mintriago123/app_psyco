@@ -57,6 +57,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   const isAuthRoute =
     pathname === "/login" ||
     pathname === "/register" ||
+    pathname === "/reset-password" ||
     pathname.startsWith("/auth/callback");
 
   if (!user && !isAuthRoute) {

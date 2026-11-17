@@ -65,6 +65,39 @@ export async function signIn(
   }
 }
 
+/** Envía el enlace de recuperación y vuelve al callback de Auth de la app. */
+export async function requestPasswordReset(
+  email: string,
+): Promise<{ error: AuthOperationError | null }> {
+  try {
+    const origin =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : (process.env.NEXT_PUBLIC_SITE_URL ?? "");
+    if (!origin) {
+      return { error: new Error("No se pudo determinar la dirección de la aplicación.") };
+    }
+
+    const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent("/reset-password")}`;
+    const { error } = await createClient().auth.resetPasswordForEmail(email, { redirectTo });
+    return { error };
+  } catch (error) {
+    return { error: toError(error) };
+  }
+}
+
+/** Actualiza la contraseña del usuario de la sesión activa. */
+export async function updatePassword(
+  password: string,
+): Promise<{ error: AuthOperationError | null }> {
+  try {
+    const { error } = await createClient().auth.updateUser({ password });
+    return { error };
+  } catch (error) {
+    return { error: toError(error) };
+  }
+}
+
 export async function signOut(): Promise<{
   data: null;
   error: AuthOperationError | null;

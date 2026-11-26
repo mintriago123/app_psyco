@@ -15,7 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Psicopatología I | Semiología y Fenomenología",
+  title: "PsiQuest | Psicopatología I",
+  applicationName: "PsiQuest",
   description: "Plataforma de práctica para Psicopatología I de ULEAM.",
 };
 

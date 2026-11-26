@@ -31,10 +31,10 @@ export function Navbar() {
   return (
     <header className="site-nav">
       <nav className="nav-inner" aria-label="Navegación principal">
-        <Link className="brand-lockup" href="/" aria-label="Psicopatología I, mapa de estudio">
+        <Link className="brand-lockup" href="/" aria-label="PsiQuest, mapa de estudio">
           <span className="brand-mark"><Icon name="mark" size={22} /></span>
           <span className="brand-copy">
-            <strong>Psicopatología I</strong>
+            <strong>PsiQuest</strong>
             <span>Semiología y Fenomenología</span>
           </span>
         </Link>

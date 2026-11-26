@@ -5,10 +5,13 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as Reac
 import { requestPasswordReset, signIn, signUp } from "../lib/supabase/auth.service";
 import { Icon } from "./Icon";
 import { useAppState } from "./AppProviders";
+import "./AuthPanel.css";
 
 interface AuthPanelProps {
   mode: "login" | "register";
 }
+
+const MIN_PASSWORD_LENGTH = 8;
 
 function getAuthErrorMessage(error: Error): string {
   const code =
@@ -16,20 +19,28 @@ function getAuthErrorMessage(error: Error): string {
   const message = error.message.toLowerCase();
 
   if (
-    code === "over_email_send_rate_limit" ||
-    message.includes("email rate limit exceeded")
-  ) {
-    return "Se alcanzó el límite de correos de confirmación de Supabase. Espera a que se libere o configura un proveedor SMTP en Authentication para habilitar más registros.";
-  }
-
-  if (
     code === "over_request_rate_limit" ||
+    code === "over_email_send_rate_limit" ||
+    message.includes("email rate limit exceeded") ||
     message.includes("too many requests")
   ) {
     return "Se hicieron demasiados intentos en poco tiempo. Espera unos minutos e inténtalo de nuevo.";
   }
 
-  return error.message || "No se pudo completar la solicitud.";
+  if (code === "invalid_credentials" || message.includes("invalid login credentials")) {
+    return "El correo o la contraseña son incorrectos.";
+  }
+  if (code === "weak_password" || error.name === "AuthWeakPasswordError") {
+    return "Elige una contraseña más segura de al menos 8 caracteres.";
+  }
+  if (code === "email_exists" || code === "user_already_exists") {
+    return "Si ya tienes una cuenta con ese correo, inicia sesión o recupera tu contraseña.";
+  }
+  if (code === "request_timeout" || error.name === "AuthRetryableFetchError") {
+    return "No pudimos conectar. Revisa tu conexión e inténtalo de nuevo.";
+  }
+
+  return "No pudimos completar la solicitud. Inténtalo de nuevo.";
 }
 
 function getRecoveryErrorMessage(error: Error): string {
@@ -41,7 +52,7 @@ function getRecoveryErrorMessage(error: Error): string {
   if (code === "over_request_rate_limit" || message.includes("too many requests")) {
     return "Se hicieron demasiadas solicitudes en poco tiempo. Espera unos minutos e inténtalo de nuevo.";
   }
-  return error.message || "No se pudo enviar el enlace. Inténtalo de nuevo.";
+  return "No se pudo enviar el enlace. Inténtalo de nuevo.";
 }
 
 export function AuthPanel({ mode }: AuthPanelProps) {
@@ -50,19 +61,22 @@ export function AuthPanel({ mode }: AuthPanelProps) {
   const [currentMode, setCurrentMode] = useState(mode);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [needsSignIn, setNeedsSignIn] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [recoveryEmail, setRecoveryEmail] = useState("");
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [recoverySent, setRecoverySent] = useState(false);
   const emailInputRef = useRef<HTMLInputElement>(null);
+  const submissionInFlight = useRef(false);
   const recoveryEmailRef = useRef<HTMLInputElement>(null);
   const recoveryTriggerRef = useRef<HTMLButtonElement>(null);
   const recoveryDialogRef = useRef<HTMLElement>(null);
   const loginTabRef = useRef<HTMLButtonElement>(null);
   const registerTabRef = useRef<HTMLButtonElement>(null);
   const isRegister = currentMode === "register";
+  const submitLabel = isRegister ? "Crear cuenta" : "Iniciar sesión";
+  const submittingLabel = isRegister ? "Creando cuenta…" : "Iniciando sesión…";
 
   useEffect(() => {
     if (!sessionLoading && user) router.replace("/");
@@ -102,12 +116,13 @@ export function AuthPanel({ mode }: AuthPanelProps) {
   }, [recoveryOpen]);
 
   function changeMode(nextMode: AuthPanelProps["mode"]) {
-    if (nextMode === currentMode) return;
+    if (submissionInFlight.current || nextMode === currentMode) return;
 
     setCurrentMode(nextMode);
     setError(null);
-    setMessage(null);
+    setNeedsSignIn(false);
     window.history.replaceState(null, "", nextMode === "register" ? "/register" : "/login");
+    (nextMode === "login" ? loginTabRef : registerTabRef).current?.focus();
   }
 
   function openRecovery() {
@@ -131,32 +146,27 @@ export function AuthPanel({ mode }: AuthPanelProps) {
   }
 
   function handleModeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
-    const nextMode = currentMode === "login" ? "register" : "login";
-    changeMode(nextMode);
-    (nextMode === "login" ? loginTabRef : registerTabRef).current?.focus();
+    if (event.key === "Home") changeMode("login");
+    else if (event.key === "End") changeMode("register");
+    else changeMode(isRegister ? "login" : "register");
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    setMessage(null);
+    if (submissionInFlight.current || needsSignIn) return;
 
     const form = new FormData(event.currentTarget);
     const email = String(form.get("email") ?? "").trim();
     const password = String(form.get("password") ?? "");
+    submissionInFlight.current = true;
+    setSubmitting(true);
+    setError(null);
+
     const result = isRegister
       ? await signUp(email, password)
       : await signIn(email, password);
-
-    setSubmitting(false);
-    if (result.error) {
-      setError(getAuthErrorMessage(result.error));
-      return;
-    }
 
     if (result.data?.session) {
       setSession(result.data.session);
@@ -165,8 +175,15 @@ export function AuthPanel({ mode }: AuthPanelProps) {
       return;
     }
 
+    submissionInFlight.current = false;
+    setSubmitting(false);
+    if (result.error) {
+      setError(getAuthErrorMessage(result.error));
+      return;
+    }
+
     if (isRegister && result.data?.user) {
-      setMessage("Cuenta creada. Revisa tu correo para confirmar y luego inicia sesión.");
+      setNeedsSignIn(true);
       return;
     }
 
@@ -175,9 +192,122 @@ export function AuthPanel({ mode }: AuthPanelProps) {
 
   return (
     <section className="auth-layout page-wrap">
+      <div className="auth-card auth-access-card glass-card">
+        <div className="auth-card-head">
+          <span className="auth-card-icon"><Icon name={isRegister ? "spark" : "mark"} size={22} /></span>
+          <h1>{isRegister ? "Crea tu cuenta en PsiQuest" : "Inicia sesión en PsiQuest"}</h1>
+        </div>
+        <p className="auth-caption">
+          {isRegister
+            ? "Crea tu cuenta y entra directamente al mapa."
+            : "Usa tu correo y contraseña para continuar tu estudio."}
+        </p>
+
+        <div
+          className="auth-mode-tabs"
+          role="tablist"
+          aria-label="Modo de autenticación"
+          onKeyDown={handleModeKeyDown}
+        >
+          <button
+            ref={loginTabRef}
+            id="auth-tab-login"
+            className="auth-mode-tab"
+            type="button"
+            role="tab"
+            aria-selected={currentMode === "login"}
+            aria-controls="auth-mode-panel"
+            disabled={submitting}
+            tabIndex={currentMode === "login" ? 0 : -1}
+            onClick={() => changeMode("login")}
+          >
+            Iniciar sesión
+          </button>
+          <button
+            ref={registerTabRef}
+            id="auth-tab-register"
+            className="auth-mode-tab"
+            type="button"
+            role="tab"
+            aria-selected={currentMode === "register"}
+            aria-controls="auth-mode-panel"
+            disabled={submitting}
+            tabIndex={currentMode === "register" ? 0 : -1}
+            onClick={() => changeMode("register")}
+          >
+            Crear cuenta
+          </button>
+        </div>
+
+        <div id="auth-mode-panel" role="tabpanel" aria-labelledby={`auth-tab-${currentMode}`}>
+          <form id="auth-form" className="auth-form" aria-busy={submitting} onSubmit={handleSubmit}>
+            <label htmlFor="auth-email">Correo electrónico</label>
+            <input
+              ref={emailInputRef}
+              autoComplete="username"
+              id="auth-email"
+              name="email"
+              type="email"
+              placeholder="nombre@correo.com"
+              readOnly={submitting}
+              required
+            />
+            <label htmlFor="auth-password">Contraseña</label>
+            <input
+              key={currentMode}
+              autoComplete={isRegister ? "new-password" : "current-password"}
+              aria-describedby={isRegister ? "auth-password-hint" : undefined}
+              id="auth-password"
+              name="password"
+              type="password"
+              minLength={isRegister ? MIN_PASSWORD_LENGTH : undefined}
+              readOnly={submitting}
+              required
+            />
+            {isRegister && <p id="auth-password-hint" className="auth-field-hint">Mínimo de ocho caracteres.</p>}
+            {!isRegister && (
+              <button
+                ref={recoveryTriggerRef}
+                className="auth-recovery-trigger"
+                type="button"
+                disabled={submitting}
+                onClick={openRecovery}
+              >
+                ¿Olvidaste tu contraseña?
+              </button>
+            )}
+            {error && <p className="form-message form-message-error" role="alert">{error}</p>}
+            {needsSignIn ? (
+              <>
+                <p className="form-message" role="status">No pudimos iniciar sesión automáticamente.</p>
+                <button className="button button-primary auth-submit" type="button" onClick={() => changeMode("login")}>
+                  Ir a iniciar sesión <Icon name="arrow" size={18} />
+                </button>
+              </>
+            ) : (
+              <button className="button button-primary auth-submit" type="submit" disabled={submitting}>
+                {submitting ? submittingLabel : submitLabel}
+                {!submitting && <Icon name="arrow" size={18} />}
+              </button>
+            )}
+          </form>
+        </div>
+
+        <p className="auth-switch">
+          {isRegister ? "¿Ya tienes cuenta?" : "¿Primera vez aquí?"}{" "}
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={() => changeMode(isRegister ? "login" : "register")}
+          >
+            {isRegister ? "Inicia sesión" : "Crea una cuenta"}
+          </button>
+        </p>
+      </div>
+
       <div className="auth-intro">
         <span className="eyebrow"><Icon name="spark" size={15} /> ENTRENAMIENTO CLÍNICO</span>
-        <h1>{isRegister ? "Empieza tu ruta de estudio." : "Vuelve a tu práctica clínica."}</h1>
+        <h2>Entrena tu mirada clínica.</h2>
         <p>
           Repasa los conceptos de Psicopatología I, resuelve retos y conserva tu avance en todos tus dispositivos.
         </p>
@@ -193,104 +323,6 @@ export function AuthPanel({ mode }: AuthPanelProps) {
           <span className="orbit-dot orbit-dot-two" />
           <span className="orbit-dot orbit-dot-three" />
         </div>
-      </div>
-
-      <div className="auth-card glass-card">
-        <div className="auth-card-head">
-          <span className="auth-card-icon"><Icon name={isRegister ? "spark" : "mark"} size={22} /></span>
-          <div>
-            <span className="eyebrow">CUENTA PERSONAL</span>
-            <h2>{isRegister ? "Crear cuenta" : "Iniciar sesión"}</h2>
-          </div>
-        </div>
-        <p className="auth-caption">
-          {isRegister ? "Tu recorrido queda guardado en la nube." : "Continúa donde dejaste tu estudio."}
-        </p>
-
-        <div
-          className="auth-mode-tabs"
-          role="tablist"
-          aria-label="Modo de autenticación"
-          data-mode={currentMode}
-          onKeyDown={handleModeKeyDown}
-        >
-          <span className="auth-mode-slider" aria-hidden="true" />
-          <button
-            ref={loginTabRef}
-            id="auth-tab-login"
-            className="auth-mode-tab"
-            type="button"
-            role="tab"
-            aria-selected={currentMode === "login"}
-            aria-controls="auth-form"
-            tabIndex={currentMode === "login" ? 0 : -1}
-            onClick={() => changeMode("login")}
-          >
-            Iniciar sesión
-          </button>
-          <button
-            ref={registerTabRef}
-            id="auth-tab-register"
-            className="auth-mode-tab"
-            type="button"
-            role="tab"
-            aria-selected={currentMode === "register"}
-            aria-controls="auth-form"
-            tabIndex={currentMode === "register" ? 0 : -1}
-            onClick={() => changeMode("register")}
-          >
-            Crear cuenta
-          </button>
-        </div>
-
-        <form id="auth-form" className="auth-form" onSubmit={handleSubmit}>
-          <label htmlFor="auth-email">Correo electrónico</label>
-          <input
-            ref={emailInputRef}
-            autoComplete="email"
-            id="auth-email"
-            name="email"
-            type="email"
-            placeholder="nombre@correo.com"
-            required
-          />
-          <label htmlFor="auth-password">Contraseña</label>
-          <input
-            autoComplete={isRegister ? "new-password" : "current-password"}
-            id="auth-password"
-            name="password"
-            type="password"
-            placeholder={isRegister ? "Al menos 8 caracteres" : "Tu contraseña"}
-            minLength={isRegister ? 8 : undefined}
-            required
-          />
-          {!isRegister && (
-            <button
-              ref={recoveryTriggerRef}
-              className="auth-recovery-trigger"
-              type="button"
-              onClick={openRecovery}
-            >
-              ¿Olvidaste tu contraseña?
-            </button>
-          )}
-          {error && <p className="form-message form-message-error" role="alert">{error}</p>}
-          {message && <p className="form-message form-message-success" role="status">{message}</p>}
-          <button className="button button-primary auth-submit" type="submit" disabled={submitting}>
-            {submitting ? "Procesando…" : isRegister ? "Crear mi cuenta" : "Entrar al mapa"}
-            {!submitting && <Icon name="arrow" size={18} />}
-          </button>
-        </form>
-
-        <p className="auth-switch">
-          {isRegister ? "¿Ya tienes cuenta?" : "¿Primera vez aquí?"}{" "}
-          <button
-            type="button"
-            onClick={() => changeMode(isRegister ? "login" : "register")}
-          >
-            {isRegister ? "Inicia sesión" : "Crea una cuenta"}
-          </button>
-        </p>
       </div>
 
       {recoveryOpen && (

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { GameSessionState, Question, UnitId } from "../../../../../types/spec";
+import type { PersistedGameSession, Question, UnitId } from "../../../../../types/spec";
 import questionBankData from "../../../../../data/questions_bank.json";
 import { useAppState } from "../../../../components/AppProviders";
 import { Icon } from "../../../../components/Icon";
@@ -11,10 +11,11 @@ import {
   getSessionSummary,
 } from "../../../../../lib/game-engine";
 import {
-  getResultPersistenceKey,
+  getFinishedGame,
   readGameResult,
+  storeGameResult,
 } from "../../../../lib/game-session-storage";
-import { persistFinishedSession } from "../../../../lib/game-results";
+import { getProgress, persistFinishedSession } from "../../../../lib/supabase/progress.service";
 import { STUDY_UNITS } from "../../../../lib/unit-catalog";
 
 const questionBank = questionBankData as Question[];
@@ -24,74 +25,97 @@ function parseUnitId(value: string): UnitId | null {
   return STUDY_UNITS.some((unit) => unit.id === numericId) ? (numericId as UnitId) : null;
 }
 
-type SaveState = "idle" | "saving" | "saved" | "error";
+type ResultState =
+  | { status: "saved"; session: PersistedGameSession }
+  | { status: "missing"; session: null }
+  | { status: "error"; session: PersistedGameSession | null; message: string };
 
 export default function ResultExperience({ unitParam }: { unitParam: string }) {
-  const { user, loading: sessionLoading, refreshProgress } = useAppState();
+  const { user, loading } = useAppState();
   const unitId = parseUnitId(unitParam);
-  const [session, setSession] = useState<GameSessionState | null>(null);
-  const [sessionLoaded, setSessionLoaded] = useState(false);
-  const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
-  const activeSaveKey = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (!unitId) {
-      setSessionLoaded(true);
-      return;
-    }
-    setSession(readGameResult(unitId));
-    setSessionLoaded(true);
-  }, [unitId]);
-
-  const unit = useMemo(
-    () => (unitId ? STUDY_UNITS.find((item) => item.id === unitId) ?? null : null),
-    [unitId],
-  );
-
-  useEffect(() => {
-    if (!sessionLoaded || !session || !user || sessionLoading) return;
-    const saveKey = getResultPersistenceKey(session);
-    if (window.sessionStorage.getItem(saveKey) === "done") {
-      setSaveState("saved");
-      return;
-    }
-    if (activeSaveKey.current === saveKey) return;
-
-    activeSaveKey.current = saveKey;
-    setSaveState("saving");
-    setSaveError(null);
-
-    void persistFinishedSession(user.id, session).then(({ error }) => {
-      if (error) {
-        activeSaveKey.current = null;
-        setSaveState("error");
-        setSaveError(error.message || "No se pudo sincronizar el resultado.");
-        return;
-      }
-      window.sessionStorage.setItem(saveKey, "done");
-      setSaveState("saved");
-      void refreshProgress();
-    }).catch((error: unknown) => {
-      activeSaveKey.current = null;
-      setSaveState("error");
-      setSaveError(error instanceof Error ? error.message : "No se pudo sincronizar el resultado.");
-    });
-  }, [refreshProgress, retryCount, session, sessionLoaded, sessionLoading, user]);
-
-  if (sessionLoading || !sessionLoaded) {
+  if (loading && !user) {
     return <div className="result-shell"><div className="status-panel" role="status"><p>Preparando el resumen de la partida…</p></div></div>;
   }
-
   if (!user) {
     return <div className="result-shell"><div className="status-panel"><p>Inicia sesión para recuperar el resultado guardado.</p><Link className="button button-primary" href="/login">Iniciar sesión</Link></div></div>;
   }
 
-  if (!unitId || !unit || !session) {
-    return <div className="result-shell"><div className="status-panel"><p>No se encontró un resultado para esta unidad en esta pestaña.</p><Link className="button button-quiet" href="/">Volver al mapa</Link></div></div>;
+  const unit = STUDY_UNITS.find((item) => item.id === unitId);
+  if (!unit) {
+    return <div className="result-shell"><div className="status-panel"><p>La unidad solicitada no existe.</p><Link className="button button-quiet" href="/">Volver al mapa</Link></div></div>;
   }
 
+  return <GameResult key={`${user.id}:${unit.id}`} userId={user.id} unit={unit} />;
+}
+
+function GameResult({ userId, unit }: { userId: string; unit: (typeof STUDY_UNITS)[number] }) {
+  const { refreshProgress } = useAppState();
+  const [result, setResult] = useState<ResultState | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function syncResult() {
+      const localResult = readGameResult(userId, unit.id);
+      try {
+        if (localResult) {
+          const saved = await persistFinishedSession(userId, localResult);
+          if (cancelled) return;
+          storeGameResult(userId, saved);
+          setResult({ status: "saved", session: saved });
+          void refreshProgress();
+          return;
+        }
+
+        const progress = await getProgress(userId);
+        if (cancelled) return;
+        const saved = getFinishedGame(progress?.active_game_session);
+        setResult(saved?.unitId === unit.id
+          ? { status: "saved", session: saved }
+          : { status: "missing", session: null });
+      } catch (error) {
+        if (!cancelled) {
+          setResult({
+            status: "error",
+            session: localResult,
+            message: error instanceof Error ? error.message : "No se pudo sincronizar el resultado.",
+          });
+        }
+      }
+    }
+
+    void syncResult();
+    return () => { cancelled = true; };
+  }, [refreshProgress, retryCount, unit.id, userId]);
+
+  function retry() {
+    setResult(null);
+    setRetryCount((count) => count + 1);
+  }
+
+  if (!result) {
+    return <div className="result-shell"><div className="status-panel" role="status"><p>Sincronizando resultado, XP y preguntas falladas…</p></div></div>;
+  }
+  if (!result.session) {
+    return (
+      <div className="result-shell">
+        <div className="status-panel">
+          {result.status === "error" ? (
+            <>
+              <p role="alert">{result.message}</p>
+              <button className="button button-quiet" type="button" onClick={retry}>Reintentar sincronización</button>
+            </>
+          ) : (
+            <p>No se encontró un resultado para esta unidad.</p>
+          )}
+          <Link className="button button-quiet" href="/">Volver al mapa</Link>
+        </div>
+      </div>
+    );
+  }
+
+  const session = result.session;
   const summary = getSessionSummary(session);
   const failedQuestions = summary.failedQuestionIds
     .map((questionId) => questionBank.find((question) => question.id === questionId))
@@ -109,7 +133,7 @@ export default function ResultExperience({ unitParam }: { unitParam: string }) {
           <h1>{isWin ? "Lección completada." : "La práctica termina aquí."}</h1>
           <p>
             {isWin
-              ? "Terminaste todos los retos de la sesión conservando al menos una vida. Tu avance ya forma parte de tu ruta."
+              ? "Terminaste todos los retos de la sesión conservando al menos una vida."
               : "Llegaste a cero vidas. Revisa las preguntas y sus explicaciones; podrás iniciar otra partida con cinco vidas."}
           </p>
         </header>
@@ -144,12 +168,11 @@ export default function ResultExperience({ unitParam }: { unitParam: string }) {
         )}
 
         <div className="save-status">
-          {saveState === "saving" && <p className="form-message" role="status">Sincronizando resultado, XP y preguntas falladas…</p>}
-          {saveState === "saved" && <p className="form-message form-message-success" role="status">Resultado y progreso sincronizados.</p>}
-          {saveState === "error" && (
+          {result.status === "saved" && <p className="form-message form-message-success" role="status">Resultado y progreso sincronizados.</p>}
+          {result.status === "error" && (
             <div className="form-message form-message-error" role="alert">
-              <p>{saveError}</p>
-              <button className="button button-quiet" type="button" onClick={() => setRetryCount((count) => count + 1)}>
+              <p>{result.message}</p>
+              <button className="button button-quiet" type="button" onClick={retry}>
                 Reintentar sincronización
               </button>
             </div>
@@ -157,7 +180,7 @@ export default function ResultExperience({ unitParam }: { unitParam: string }) {
         </div>
 
         <footer className="result-actions">
-          {!isWin && (
+          {!isWin && result.status === "saved" && (
             <Link className="button button-primary" href={`/unit/${unit.id}/play`}>
               Nueva partida <Icon name="arrow" size={16} />
             </Link>

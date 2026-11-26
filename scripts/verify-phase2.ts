@@ -26,6 +26,9 @@ const questionData: unknown = JSON.parse(
 const notesData: unknown = JSON.parse(
   readFileSync(join(root, "data/key_notes.json"), "utf8"),
 );
+const vaultData: unknown = JSON.parse(
+  readFileSync(join(root, "data/vault_questions.json"), "utf8"),
+);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -146,6 +149,53 @@ for (const unitId of [1, 2, 3, 4, 5, 6, 7, 8] as const) {
 const formats = new Set(questions.map((question) => question.format));
 assert.deepEqual([...formats].sort(), ["clinical_case", "multiple_choice", "true_false"]);
 console.log("PASS banco: 75 preguntas, IDs únicos, 8 unidades con distribución aprobada y formatos válidos");
+
+assert.ok(Array.isArray(vaultData), "el banco del Baúl es un arreglo JSON");
+assert.equal(vaultData.length, questions.length, "hay una variante por pregunta");
+const originalsById = new Map(questions.map((question) => [question.id, question]));
+const assignedOriginalIds = new Set<string>();
+const normalizeText = (value: string) => value.normalize("NFC").toLowerCase()
+  .replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+const prompts = new Set(questions.map((question) => normalizeText(question.prompt)));
+for (const value of vaultData) {
+  assert.ok(isRecord(value), "cada variante es un objeto");
+  const id = requireString(value.originalQuestionId, "variant.originalQuestionId");
+  const original = originalsById.get(id);
+  assert.ok(original, `pregunta original de la variante: ${id}`);
+  assert.ok(!assignedOriginalIds.has(id), `una sola variante para ${id}`);
+  assignedOriginalIds.add(id);
+  const expectedFormats = original.format === "clinical_case"
+    ? ["true_false", "multiple_choice"]
+    : ["clinical_case"];
+  assert.ok(expectedFormats.some((format) => format === value.format), `formato de repaso: ${id}`);
+  assert.equal(value.unitId, original.unitId, `misma unidad que la original: ${id}`);
+  assert.equal(value.sourcePage, original.sourcePage, `misma referencia que la original: ${id}`);
+
+  const prompt = normalizeText(requireString(value.prompt, `${id}.variant.prompt`));
+  assert.ok(prompt && !prompts.has(prompt), `enunciado distinto: ${id}`);
+  prompts.add(prompt);
+  assert.ok(requireString(value.explanation, `${id}.variant.explanation`).trim(), `explicación: ${id}`);
+
+  const isTrueFalse = value.format === "true_false";
+  assert.ok(Array.isArray(value.options), `opciones de repaso: ${id}`);
+  assert.equal(value.options.length, isTrueFalse ? 2 : 4, `cantidad de opciones: ${id}`);
+  const optionIds = new Set<string>();
+  const optionTexts = new Set<string>();
+  for (const option of value.options) {
+    assert.ok(isRecord(option), `opción de repaso: ${id}`);
+    optionIds.add(requireString(option.id, `${id}.variant.option.id`));
+    const text = normalizeText(requireString(option.text, `${id}.variant.option.text`));
+    assert.ok(text, `opción con texto: ${id}`);
+    optionTexts.add(text);
+  }
+  assert.equal(optionIds.size, value.options.length, `IDs de opción únicos: ${id}`);
+  assert.equal(optionTexts.size, value.options.length, `textos de opción únicos: ${id}`);
+  assert.ok(optionIds.has(requireString(value.correctOptionId, `${id}.variant.correctOptionId`)), `respuesta válida: ${id}`);
+  if (isTrueFalse) {
+    assert.deepEqual([...optionIds].sort(), ["false", "true"], `opciones verdadero y falso: ${id}`);
+  }
+}
+console.log("PASS Baúl: 75 variantes con un formato distinto, opciones válidas y vínculo con la pregunta original");
 
 assert.ok(Array.isArray(notesData), "los apuntes son un arreglo JSON");
 notesData.forEach(assertKeyNotes);

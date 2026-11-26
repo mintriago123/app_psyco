@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import questionBankData from "../../../../../data/questions_bank.json";
-import type { GameSessionState, Question, UnitId } from "../../../../../types/spec";
+import type { GameSessionState, PersistedGameSession, Question, UnitId } from "../../../../../types/spec";
 import { useGameExitGuard } from "../../../../hooks/useGameExitGuard";
-import { addToErrorVault, upsertProgress } from "../../../../lib/supabase/progress.service";
+import { addToErrorVault, startGameSession } from "../../../../lib/supabase/progress.service";
 import {
   continueAfterFeedback,
   createGameSession,
@@ -17,7 +17,7 @@ import {
   submitAnswer,
 } from "../../../../../lib/game-engine";
 import { STUDY_UNITS } from "../../../../lib/unit-catalog";
-import { storeGameResult } from "../../../../lib/game-session-storage";
+import { readGameResult, storeGameResult } from "../../../../lib/game-session-storage";
 import { useAppState } from "../../../../components/AppProviders";
 import { Icon } from "../../../../components/Icon";
 
@@ -49,64 +49,60 @@ function PlayExperience({ unitParam }: { unitParam: string }) {
     refreshProgress,
   } = useAppState();
   const unitId = parseUnitId(unitParam);
-  const [gameSession, setGameSession] = useState<GameSessionState | null>(null);
-  const [ready, setReady] = useState(false);
+  const userId = user?.id ?? null;
+  const [gameSession, setGameSession] = useState<PersistedGameSession | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
+  const [resumeUnitId, setResumeUnitId] = useState<UnitId | null>(null);
   const [saveWarning, setSaveWarning] = useState<string | null>(null);
   const [xpToast, setXpToast] = useState<number | null>(null);
-  const initializationKey = useRef<string | null>(null);
   const toastTimeout = useRef<number | null>(null);
 
-  useGameExitGuard({ userId: user?.id ?? null, session: gameSession });
+  useGameExitGuard({ userId, session: gameSession });
 
   useEffect(() => {
-    if (sessionLoading || progressLoading || !user || !unitId || !progress) return;
-    const key = `${user.id}:${unitId}`;
-    if (initializationKey.current === key) return;
-    initializationKey.current = key;
-
+    if (sessionLoading || progressLoading || !userId || !unitId || progress?.user_id !== userId || gameSession || initError) return;
     if (!progress.unlocked_unit_ids.includes(unitId)) {
       router.replace("/");
       return;
     }
 
-    const savedSession = progress.active_game_session;
-    if (savedSession?.phase === "active" && savedSession.unitId !== unitId) {
-      setInitError(
-        `Tienes una partida activa en la Unidad ${savedSession.unitId}. Retómala antes de iniciar otra.`,
-      );
-      setReady(true);
-      return;
+    let cancelled = false;
+    async function initialize(owner: string, requestedUnit: UnitId) {
+      try {
+        const localResult = readGameResult(owner, requestedUnit);
+        if (localResult && localResult.sessionId === progress?.active_game_session?.sessionId) {
+          router.replace(`/unit/${requestedUnit}/result`);
+          return;
+        }
+
+        const session = await startGameSession(owner, createGameSession({
+          unitId: requestedUnit,
+          questions: questionBank,
+          seed: makeSeed(),
+        }));
+        if (cancelled) return;
+
+        if (session.unitId !== requestedUnit) {
+          setResumeUnitId(session.unitId);
+          setInitError(`Tienes una partida activa en la Unidad ${session.unitId}. Retómala antes de iniciar otra.`);
+          return;
+        }
+
+        if (localResult?.sessionId === session.sessionId) {
+          router.replace(`/unit/${requestedUnit}/result`);
+          return;
+        }
+        setGameSession(session);
+      } catch (error) {
+        if (!cancelled) {
+          setInitError(error instanceof Error ? error.message : "No se pudo iniciar la partida.");
+        }
+      }
     }
 
-    if (savedSession?.phase === "active" && savedSession.unitId === unitId) {
-      setGameSession(savedSession);
-      setReady(true);
-      return;
-    }
-
-    try {
-      const nextSession = createGameSession({
-        unitId,
-        questions: questionBank,
-        seed: makeSeed(),
-      });
-      setGameSession(nextSession);
-      setReady(true);
-      void upsertProgress(user.id, {
-        active_game_session: nextSession,
-        statistics: {
-          ...progress.statistics,
-          gamesStarted: progress.statistics.gamesStarted + 1,
-        },
-      }).then(({ error }) => {
-        if (error) setSaveWarning("La partida inició, pero el guardado en la nube no se confirmó.");
-      });
-    } catch (error) {
-      setInitError(error instanceof Error ? error.message : "No se pudo iniciar la partida.");
-      setReady(true);
-    }
-  }, [progress, progressLoading, router, sessionLoading, unitId, user]);
+    void initialize(userId, unitId);
+    return () => { cancelled = true; };
+  }, [gameSession, initError, progress, progressLoading, router, sessionLoading, unitId, userId]);
 
   useEffect(() => () => {
     if (toastTimeout.current !== null) window.clearTimeout(toastTimeout.current);
@@ -124,19 +120,20 @@ function PlayExperience({ unitParam }: { unitParam: string }) {
     : null;
   const progressPercent = gameSession ? getProgressPercent(gameSession) : 0;
 
-  function finishSession(session: GameSessionState) {
-    storeGameResult(session);
+  function finishSession(session: PersistedGameSession) {
+    if (!userId) return;
+    storeGameResult(userId, session);
     router.replace(`/unit/${session.unitId}/result`);
   }
 
   function handleAnswer(optionId: string) {
-    if (!gameSession || !currentQuestion || gameSession.feedback || gameSession.phase !== "active") return;
+    if (!userId || !gameSession || !currentQuestion || gameSession.feedback || gameSession.phase !== "active") return;
 
-    const nextSession = submitAnswer(gameSession, currentQuestion, optionId);
+    const nextSession = reviseSession(gameSession, submitAnswer(gameSession, currentQuestion, optionId));
     setGameSession(nextSession);
 
     if (nextSession.feedback?.outcome === "incorrect") {
-      void addToErrorVault(user!.id, currentQuestion.id).then(({ error }) => {
+      void addToErrorVault(userId, currentQuestion.id).then(({ error }) => {
         if (error) setSaveWarning("Un error todavía no se sincroniza con el Baúl; se intentará guardar al cerrar la partida.");
       });
       if (nextSession.phase === "out_of_lives") finishSession(nextSession);
@@ -156,15 +153,15 @@ function PlayExperience({ unitParam }: { unitParam: string }) {
 
   function handleHint() {
     if (!gameSession || !currentQuestion || !currentInstance || currentInstance.hintUsed) return;
-    setGameSession(revealHint(gameSession, currentQuestion));
+    setGameSession(reviseSession(gameSession, revealHint(gameSession, currentQuestion)));
   }
 
   function handleContinue() {
     if (!gameSession || gameSession.phase !== "active" || !gameSession.feedback) return;
-    setGameSession(continueAfterFeedback(gameSession));
+    setGameSession(reviseSession(gameSession, continueAfterFeedback(gameSession)));
   }
 
-  if (sessionLoading || progressLoading || !ready) {
+  if (sessionLoading || progressLoading) {
     return <div className="page-wrap"><div className="status-panel" role="status"><p>Preparando la partida y sincronizando tu progreso…</p></div></div>;
   }
 
@@ -181,19 +178,24 @@ function PlayExperience({ unitParam }: { unitParam: string }) {
   }
 
   if (initError) {
-    const savedUnitId = progress?.active_game_session?.unitId;
     return (
       <div className="page-wrap">
         <div className="status-panel">
           <p>{initError}</p>
-          {savedUnitId && <Link className="button button-primary" href={`/unit/${savedUnitId}/play`}>Retomar Unidad {savedUnitId}</Link>}
+          {resumeUnitId
+            ? <Link className="button button-primary" href={`/unit/${resumeUnitId}/play`}>Retomar Unidad {resumeUnitId}</Link>
+            : <button className="button button-primary" type="button" onClick={() => setInitError(null)}>Reintentar</button>}
           <Link className="button button-quiet" href="/">Volver al mapa</Link>
         </div>
       </div>
     );
   }
 
-  if (!gameSession || !currentInstance || !currentQuestion) {
+  if (!gameSession || gameSession.phase !== "active") {
+    return <div className="page-wrap"><div className="status-panel" role="status"><p>Preparando la partida y sincronizando tu progreso…</p></div></div>;
+  }
+
+  if (!currentInstance || !currentQuestion) {
     return <div className="page-wrap"><div className="status-panel"><p>No se pudo recuperar la pregunta actual.</p><Link className="button button-quiet" href="/">Volver al mapa</Link></div></div>;
   }
 
@@ -277,7 +279,7 @@ function PlayExperience({ unitParam }: { unitParam: string }) {
               <button
                 aria-pressed={feedback?.selectedOptionId === option.id}
                 className={`answer-option ${isCorrect ? "is-correct" : ""} ${isWrong ? "is-wrong" : ""}`}
-                disabled={Boolean(feedback) || gameSession.phase !== "active"}
+                disabled={Boolean(feedback)}
                 key={option.id}
                 onClick={() => handleAnswer(option.id)}
                 type="button"
@@ -297,7 +299,7 @@ function PlayExperience({ unitParam }: { unitParam: string }) {
         <div className="answer-toast" role="status"><Icon name="spark" size={16} /> +{xpToast} XP</div>
       )}
 
-      {feedback && feedback.outcome === "incorrect" && gameSession.phase === "active" && (
+      {feedback?.outcome === "incorrect" && (
         <aside className="feedback-dock" aria-live="polite" aria-label="Explicación de la respuesta">
           <div className="feedback-head">
             <div>
@@ -319,6 +321,11 @@ function PlayExperience({ unitParam }: { unitParam: string }) {
   );
 }
 
+function reviseSession(previous: PersistedGameSession, next: GameSessionState): PersistedGameSession {
+  return { ...next, sessionId: previous.sessionId, revision: previous.revision + 1 };
+}
+
 export default function PlayPageClient({ unitParam }: { unitParam: string }) {
-  return <PlayExperience unitParam={unitParam} />;
+  const { user } = useAppState();
+  return <PlayExperience key={`${user?.id ?? ""}:${unitParam}`} unitParam={unitParam} />;
 }

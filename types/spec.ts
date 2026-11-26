@@ -69,6 +69,11 @@ export type Question =
   | ClinicalCaseQuestion
   | TrueFalseQuestion;
 
+export interface VaultQuestionVariant extends Omit<QuestionBase, "id"> {
+  originalQuestionId: Question["id"];
+  format: QuestionFormat;
+}
+
 export interface ComparativeTable {
   title: string;
   columns: string[];
@@ -156,6 +161,11 @@ export interface GameSessionState {
   randomSeed: number;
 }
 
+export interface PersistedGameSession extends GameSessionState {
+  sessionId: string;
+  revision: number;
+}
+
 export interface SessionSummary {
   unitId: UnitId;
   outcome: "won" | "out_of_lives";
@@ -175,7 +185,7 @@ export interface UserProgressDB {
   error_chest_question_ids: string[];
   unlocked_medals: MedalId[];
   statistics: UserStatistics;
-  active_game_session: GameSessionState | null;
+  active_game_session: (GameSessionState & Partial<Pick<PersistedGameSession, "sessionId" | "revision">>) | null;
   created_at: string;
   updated_at: string;
 }

@@ -1,41 +1,51 @@
-import type { GameSessionState, UnitId } from "../../types/spec";
+import type { GameSessionState, PersistedGameSession, UnitId } from "../../types/spec";
 
-const RESULT_SESSION_KEY = "app-psyco:game-result";
+let inMemoryResult: { key: string; session: PersistedGameSession } | null = null;
 
-function isGameSessionState(value: unknown): value is GameSessionState {
+function resultKey(userId: string, unitId: UnitId): string {
+  return `app-psyco:game-result:${userId}:${unitId}`;
+}
+
+function isGameResult(value: unknown): value is PersistedGameSession {
   if (typeof value !== "object" || value === null) return false;
 
-  const candidate = value as Partial<GameSessionState>;
+  const candidate = value as Partial<PersistedGameSession>;
   return (
+    typeof candidate.sessionId === "string" &&
+    Number.isInteger(candidate.revision) &&
     Number.isInteger(candidate.unitId) &&
     candidate.startingLives === 5 &&
     (candidate.phase === "won" || candidate.phase === "out_of_lives") &&
     Array.isArray(candidate.questionQueue) &&
+    Array.isArray(candidate.completedQuestionIds) &&
     Array.isArray(candidate.failedQuestionIds) &&
-    typeof candidate.earnedXp === "number" &&
-    typeof candidate.randomSeed === "number"
+    typeof candidate.earnedXp === "number"
   );
 }
 
-export function storeGameResult(session: GameSessionState): void {
-  if (typeof window === "undefined") return;
-  window.sessionStorage.setItem(RESULT_SESSION_KEY, JSON.stringify(session));
+export function getFinishedGame(session: GameSessionState | null | undefined): PersistedGameSession | null {
+  return isGameResult(session) ? session : null;
 }
 
-export function readGameResult(unitId: UnitId): GameSessionState | null {
-  if (typeof window === "undefined") return null;
+export function storeGameResult(userId: string, session: PersistedGameSession): void {
+  const key = resultKey(userId, session.unitId);
+  inMemoryResult = { key, session };
 
   try {
-    const value: unknown = JSON.parse(
-      window.sessionStorage.getItem(RESULT_SESSION_KEY) ?? "null",
-    );
-    if (!isGameSessionState(value) || value.unitId !== unitId) return null;
-    return value;
+    window.sessionStorage.setItem(key, JSON.stringify(session));
   } catch {
-    return null;
+    // La navegación de la pestaña puede recuperar el resultado desde memoria.
   }
 }
 
-export function getResultPersistenceKey(session: GameSessionState): string {
-  return `app-psyco:result-saved:${session.unitId}:${session.randomSeed}:${session.totalAttempts}:${session.earnedXp}`;
+export function readGameResult(userId: string, unitId: UnitId): PersistedGameSession | null {
+  const key = resultKey(userId, unitId);
+  if (inMemoryResult?.key === key) return inMemoryResult.session;
+
+  try {
+    const value: unknown = JSON.parse(window.sessionStorage.getItem(key) ?? "null");
+    return isGameResult(value) && value.unitId === unitId ? value : null;
+  } catch {
+    return null;
+  }
 }

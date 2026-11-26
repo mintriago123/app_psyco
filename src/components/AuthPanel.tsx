@@ -12,6 +12,24 @@ interface AuthPanelProps {
 }
 
 const MIN_PASSWORD_LENGTH = 8;
+const PASSWORD_STRENGTH_LABELS = ["", "Débil", "Media", "Fuerte"] as const;
+
+function getPasswordStrength(password: string) {
+  if (!password) return 0;
+
+  const normalized = password.normalize("NFKC").toLowerCase();
+  const diversity = new Set(normalized).size;
+  const predictable =
+    /^(?:password|contrase[ñn]a|qwerty|12345678|abcdefgh)[\p{N}\p{P}\p{S}]*$/u.test(normalized) ||
+    /^([\s\S]{1,4})\1+$/u.test(normalized);
+  if (password.length < MIN_PASSWORD_LENGTH || diversity < 4 || predictable) return 1;
+
+  const characterTypes = [/\p{L}/u, /\p{Lu}/u, /\p{N}/u, /[\p{P}\p{S}]/u]
+    .filter((pattern) => pattern.test(password)).length;
+  if (diversity >= 8 && (password.length >= 20 || (password.length >= 14 && characterTypes >= 3))) return 3;
+
+  return password.length >= 12 || characterTypes >= 3 ? 2 : 1;
+}
 
 function getAuthErrorMessage(error: Error): string {
   const code =
@@ -59,6 +77,8 @@ export function AuthPanel({ mode }: AuthPanelProps) {
   const router = useRouter();
   const { user, loading: sessionLoading, setSession } = useAppState();
   const [currentMode, setCurrentMode] = useState(mode);
+  const [passwordStrength, setPasswordStrength] = useState(0);
+  const [passwordTooShort, setPasswordTooShort] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsSignIn, setNeedsSignIn] = useState(false);
@@ -119,6 +139,8 @@ export function AuthPanel({ mode }: AuthPanelProps) {
     if (submissionInFlight.current || nextMode === currentMode) return;
 
     setCurrentMode(nextMode);
+    setPasswordStrength(0);
+    setPasswordTooShort(false);
     setError(null);
     setNeedsSignIn(false);
     window.history.replaceState(null, "", nextMode === "register" ? "/register" : "/login");
@@ -256,15 +278,43 @@ export function AuthPanel({ mode }: AuthPanelProps) {
             <input
               key={currentMode}
               autoComplete={isRegister ? "new-password" : "current-password"}
-              aria-describedby={isRegister ? "auth-password-hint" : undefined}
+              aria-describedby={isRegister
+                ? `auth-password-hint auth-password-strength${passwordTooShort ? " auth-password-error" : ""}`
+                : undefined}
+              aria-invalid={passwordTooShort || undefined}
               id="auth-password"
               name="password"
               type="password"
               minLength={isRegister ? MIN_PASSWORD_LENGTH : undefined}
+              onChange={isRegister ? (event) => {
+                setPasswordStrength(getPasswordStrength(event.target.value));
+                setPasswordTooShort(false);
+              } : undefined}
+              onInvalid={isRegister ? (event) => {
+                if (!event.currentTarget.validity.tooShort) return;
+                event.preventDefault();
+                setPasswordTooShort(true);
+                event.currentTarget.focus();
+              } : undefined}
               readOnly={submitting}
               required
             />
-            {isRegister && <p id="auth-password-hint" className="auth-field-hint">Mínimo de ocho caracteres.</p>}
+            {isRegister && (
+              <div className="auth-password-guide">
+                <p id="auth-password-hint" className="auth-field-hint">Usa al menos {MIN_PASSWORD_LENGTH} caracteres.</p>
+                {passwordTooShort && (
+                  <p id="auth-password-error" className="auth-field-hint auth-field-error" role="alert">
+                    Tu contraseña debe tener al menos {MIN_PASSWORD_LENGTH} caracteres.
+                  </p>
+                )}
+                <div className="auth-password-meter" data-strength={passwordStrength} aria-hidden="true">
+                  {[1, 2, 3].map((level) => <span key={level} data-active={level <= passwordStrength} />)}
+                </div>
+                <p id="auth-password-strength" className="auth-field-hint" role="status">
+                  Fortaleza estimada{passwordStrength > 0 && <> <strong>{PASSWORD_STRENGTH_LABELS[passwordStrength]}</strong></>}
+                </p>
+              </div>
+            )}
             {!isRegister && (
               <button
                 ref={recoveryTriggerRef}

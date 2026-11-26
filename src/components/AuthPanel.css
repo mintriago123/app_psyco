@@ -61,6 +61,40 @@
   font-size: 12px;
 }
 
+.auth-field-error {
+  color: var(--rose-text);
+}
+
+.auth-password-guide {
+  display: grid;
+  gap: 5px;
+}
+
+.auth-password-meter {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin: 3px 0 2px;
+}
+
+.auth-password-meter > span {
+  min-height: 4px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+
+.auth-password-meter[data-strength="1"] > [data-active="true"] {
+  background: var(--rose-text);
+}
+
+.auth-password-meter[data-strength="2"] > [data-active="true"] {
+  background: var(--amber);
+}
+
+.auth-password-meter[data-strength="3"] > [data-active="true"] {
+  background: var(--violet);
+}
+
 @media (min-width: 760px) {
   .auth-access-card {
     grid-column: 2;

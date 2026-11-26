@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import questionBankData from "../../../data/questions_bank.json";
-import type { Question } from "../../../types/spec";
+import vaultQuestionData from "../../../data/vault_questions.json";
+import type { VaultQuestionVariant } from "../../../types/spec";
 import { useAppState } from "../../components/AppProviders";
 import { Icon } from "../../components/Icon";
 import { removeFromErrorVault } from "../../lib/supabase/progress.service";
 
-const questionBank = questionBankData as Question[];
-const questionsById = new Map(questionBank.map((question) => [question.id, question]));
+const vaultQuestions = vaultQuestionData as VaultQuestionVariant[];
+const variantsByOriginalId = new Map(vaultQuestions.map((variant) => [variant.originalQuestionId, variant]));
 
 interface ReviewFeedback {
   outcome: "correct" | "incorrect";
@@ -18,7 +18,7 @@ interface ReviewFeedback {
 
 export default function ErrorVaultPage() {
   const { user, progress, loading, error, refreshProgress } = useAppState();
-  const [reviewQueue, setReviewQueue] = useState<Question[] | null>(null);
+  const [reviewQueue, setReviewQueue] = useState<VaultQuestionVariant[] | null>(null);
   const [questionIndex, setQuestionIndex] = useState(0);
   const [feedback, setFeedback] = useState<ReviewFeedback | null>(null);
   const [solvedCount, setSolvedCount] = useState(0);
@@ -52,22 +52,19 @@ export default function ErrorVaultPage() {
 
   const userId = user.id;
   const pendingIds = [...new Set(progress.error_chest_question_ids)];
-  const pendingQuestions = pendingIds
-    .map((questionId) => questionsById.get(questionId))
-    .filter((question): question is Question => Boolean(question));
-  const unresolvedCount = pendingIds.length - pendingQuestions.length;
+  const pendingVariants = pendingIds
+    .map((questionId) => variantsByOriginalId.get(questionId))
+    .filter((variant) => variant !== undefined);
+  const unresolvedCount = pendingIds.length - pendingVariants.length;
   const currentQuestion = reviewQueue?.[questionIndex] ?? null;
   const correctOption = currentQuestion?.options.find((option) => option.id === currentQuestion.correctOptionId);
 
   function startReview() {
-    const queue = pendingIds
-      .map((questionId) => questionsById.get(questionId))
-      .filter((question): question is Question => Boolean(question));
-    setReviewQueue(queue);
+    setReviewQueue(pendingVariants);
     setQuestionIndex(0);
     setFeedback(null);
     setSolvedCount(0);
-    setReviewComplete(queue.length === 0);
+    setReviewComplete(false);
     setActionError(null);
   }
 
@@ -81,7 +78,7 @@ export default function ErrorVaultPage() {
 
     setRemoving(true);
     try {
-      const result = await removeFromErrorVault(userId, currentQuestion.id);
+      const result = await removeFromErrorVault(userId, currentQuestion.originalQuestionId);
       if (result.error) {
         setActionError(`No se pudo retirar la pregunta del Baúl: ${result.error.message}`);
         return;
@@ -155,16 +152,16 @@ export default function ErrorVaultPage() {
         <section className="retention-hero">
           <span className="eyebrow"><Icon name="book" size={15} /> REPASO CLÍNICO</span>
           <h1>Vuelve sobre los conceptos que necesitan otra mirada.</h1>
-          <p>Este repaso es pedagógico: no consume vidas, no otorga XP ni modifica combos. Si aciertas, la pregunta se retira del Baúl; si fallas, permanece para otra sesión.</p>
+          <p>Practica los conceptos pendientes con preguntas en otro formato. Si aciertas, el error se retira del Baúl. El repaso no consume vidas ni cambia tu XP o tu combo.</p>
         </section>
         <section className="vault-overview glass-card">
           <div className="vault-overview-icon"><Icon name="target" size={22} /></div>
           <div><span>Preguntas guardadas</span><strong>{pendingIds.length}</strong></div>
-          <div><span>Listas para repasar</span><strong>{pendingQuestions.length}</strong></div>
+          <div><span>Listas para repasar</span><strong>{pendingVariants.length}</strong></div>
         </section>
-        {unresolvedCount > 0 && <p className="form-message form-message-error" role="status">{unresolvedCount} ID(s) del Baúl no coinciden con una pregunta del banco local.</p>}
+        {unresolvedCount > 0 && <p className="form-message form-message-error" role="status">Hay {unresolvedCount} entradas guardadas con el repaso aún pendiente de preparar.</p>}
         <div className="retention-actions">
-          <button className="button button-primary" type="button" onClick={startReview} disabled={pendingQuestions.length === 0}>Iniciar repaso <Icon name="arrow" size={16} /></button>
+          <button className="button button-primary" type="button" onClick={startReview} disabled={pendingVariants.length === 0}>Iniciar repaso <Icon name="arrow" size={16} /></button>
           <Link className="button button-quiet" href="/">Volver al mapa</Link>
         </div>
       </div>
@@ -180,7 +177,6 @@ export default function ErrorVaultPage() {
   }
 
   const selectedOption = currentQuestion.options.find((option) => option.id === feedback?.selectedOptionId);
-  const correctSelection = feedback?.outcome === "incorrect" ? correctOption : null;
 
   return (
     <div className="page-wrap retention-page">
@@ -225,15 +221,15 @@ export default function ErrorVaultPage() {
       {feedback && (
         <aside className={`review-feedback ${feedback.outcome === "correct" ? "is-correct-feedback" : ""}`} aria-live="polite">
           <strong><Icon name={feedback.outcome === "correct" ? "check" : "close"} size={16} />{feedback.outcome === "correct" ? "Concepto reforzado" : "Revisa el concepto"}</strong>
-          {feedback.outcome === "correct" ? (
-            <p>La pregunta se retiró del Baúl. El repaso no suma XP ni modifica vidas o combos.</p>
-          ) : (
-            <>
-              <p>Elegiste: <b>{selectedOption?.text}</b>. La respuesta correcta es: <b>{correctSelection?.text}</b>.</p>
-              <p>{currentQuestion.explanation}</p>
-              <span>Guía oficial · página {currentQuestion.sourcePage}. La pregunta permanece en tu Baúl.</span>
-            </>
-          )}
+          <p>
+            {feedback.outcome === "incorrect" && <>Elegiste <b>{selectedOption?.text}</b>. </>}
+            Respuesta correcta <b>{correctOption?.text}</b>.
+          </p>
+          <p>{currentQuestion.explanation}</p>
+          <span>
+            Guía oficial · página {currentQuestion.sourcePage}.{" "}
+            {feedback.outcome === "correct" ? "El error se retiró del Baúl." : "El error sigue pendiente en el Baúl."}
+          </span>
           <button className="button button-primary" type="button" onClick={() => void continueReview()}>
             {questionIndex + 1 === reviewQueue.length ? "Ver resumen" : "Siguiente pregunta"}<Icon name="arrow" size={16} />
           </button>
